@@ -1,37 +1,20 @@
-from fastapi import Header
-from fastapi import HTTPException
 
-from app.services.jwt_service import (
-    verify_token
-)
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.services.jwt_service import verify_token
+
+security = HTTPBearer(auto_error=False)
+
 
 def get_current_user(
-    authorization: str = Header(None)
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Missing token")
 
-    if not authorization:
+    payload = verify_token(credentials.credentials)
 
-        raise HTTPException(
-            status_code=401,
-            detail="Missing token"
-        )
+    if not payload or not payload.get("user_id"):
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    token = authorization.replace(
-        "Bearer ",
-        ""
-    )
-
-    payload = verify_token(
-        token
-    )
-
-
-    if not payload:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
-    print(payload)
-
-    return payload
+    return {"user_id": str(payload["user_id"])}

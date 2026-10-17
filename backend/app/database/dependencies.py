@@ -1,9 +1,10 @@
-from app.database.postgres import SessionLocal
 
-def get_db():
-    db = SessionLocal()
+from collections.abc import Generator
 
-    try:
-        yield db
-    finally:
-        db.close()
+from pymongo.database import Database
+
+from app.database.mongodb import get_database
+
+
+def get_db() -> Generator[Database, None, None]:
+    yield get_database()

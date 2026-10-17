@@ -1,18 +1,32 @@
-from sqlalchemy import Column
-from sqlalchemy import Integer
-from sqlalchemy import String
-from sqlalchemy import DateTime
-from datetime import datetime
 
-from app.database.base import Base
+from datetime import datetime, timezone
 
-class User(Base):
-    __tablename__ = "users"
+from bson import ObjectId
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    email = Column(String, unique=True)
-    password_hash = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    ai_optimizations = Column(Integer,default=0)
-print("USER FILE LOADED")
+
+def create_user_document(
+    name: str,
+    email: str,
+    password_hash: str,
+) -> dict:
+    return {
+        "name": name,
+        "email": email,
+        "password_hash": password_hash,
+        "created_at": datetime.now(timezone.utc),
+        "ai_optimizations": 0,
+    }
+
+
+def serialize_user(user: dict) -> dict:
+    return {
+        "id": str(user["_id"]),
+        "name": user["name"],
+        "email": user["email"],
+        "created_at": user["created_at"],
+        "ai_optimizations": user.get("ai_optimizations", 0),
+    }
+
+
+def is_valid_user_id(user_id: str) -> bool:
+    return ObjectId.is_valid(user_id)

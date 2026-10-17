@@ -1,35 +1,35 @@
-from sqlalchemy import Column
-from sqlalchemy import Integer
-from sqlalchemy import String
-from sqlalchemy import Text
-from sqlalchemy import DateTime
-from sqlalchemy import ForeignKey
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from app.database.base import Base
+from bson import ObjectId
 
-class Journal(Base):
 
-    __tablename__ = "journals"
+def create_journal_document(
+    title: str,
+    content: str,
+    user_id: str,
+) -> dict:
+    now = datetime.now(timezone.utc)
 
-    id = Column(Integer, primary_key=True)
+    return {
+        "title": title,
+        "content": content,
+        "created_at": now,
+        "updated_at": now,
+        "user_id": user_id,
+    }
 
-    title = Column(String)
 
-    content = Column(Text)
+def serialize_journal(journal: dict) -> dict:
+    return {
+        "id": str(journal["_id"]),
+        "title": journal.get("title", ""),
+        "content": journal.get("content", ""),
+        "created_at": journal.get("created_at"),
+        "updated_at": journal.get("updated_at"),
+        "user_id": journal.get("user_id"),
+    }
 
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
 
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
-
-    user_id = Column(
-        Integer,
-        ForeignKey("users.id")
-    )
+def is_valid_journal_id(journal_id: str) -> bool:
+    return ObjectId.is_valid(journal_id)

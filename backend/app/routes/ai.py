@@ -1,274 +1,144 @@
-from fastapi import APIRouter
-from fastapi import Depends
 
-from sqlalchemy.orm import Session
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pymongo.database import Database
 
 from app.database.dependencies import get_db
-
-from app.models.user import User
-from app.models.chat_message import ChatMessage
-
 from app.ai.rag import retrieve_context
 from app.ai.chat import chat_with_ai
 from app.ai.optimizer import optimize_journal
-
 from app.schemas.ai_schema import OptimizeRequest
-from app.schemas.chat_schema import (
-    ChatRequest
-)
-
-from app.middleware.auth_middleware import (
-    get_current_user
-)
-
-from fastapi import Request
-
+from app.schemas.chat_schema import ChatRequest
+from app.middleware.auth_middleware import get_current_user
 from app.middleware.rate_limit import limiter
-
+from bson import ObjectId
 router = APIRouter()
 
 
 @router.get("/")
 def test():
-
-    return {
-        "message": "AI Route Working"
-    }
+    return {"message": "AI Route Working"}
 
 
 @router.get("/search")
 @limiter.limit("5/minute")
 def search(
-
     request: Request,
-
     query: str,
-
-    current_user=Depends(get_current_user)
-
+    current_user=Depends(get_current_user),
 ):
-
     return retrieve_context(
-
         query,
-
-        current_user["user_id"]
-
+        current_user["user_id"],
     )
 
 
 @router.post("/optimize")
 @limiter.limit("5/minute")
 def optimize(
-
     request: Request,
-
     optimize_request: OptimizeRequest,
-
-    current_user=Depends(
-        get_current_user
-    ),
-
-    db: Session = Depends(get_db)
-
+    current_user=Depends(get_current_user),
+    db: Database = Depends(get_db),
 ):
+    user_id = current_user["user_id"]
 
     context = retrieve_context(
-
         optimize_request.content,
-
-        current_user["user_id"]
-
+        user_id,
     )
 
-    documents = []
-
-    if len(context["documents"]) > 0:
-
-        documents = context["documents"][0]
-
-    rag_context = "\n".join(documents)
+    documents = context.get("documents") or [[]]
+    rag_context = "\n".join(documents[0])
 
     optimized = optimize_journal(
-
         optimize_request.content,
-
-        rag_context
-
+        rag_context,
     )
 
-    user = (
-
-        db.query(User)
-
-        .filter(
-
-            User.id == current_user["user_id"]
-
-        )
-
-        .first()
-
+    db["users"].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$inc": {"ai_optimizations": 1}},
     )
 
-    if user:
-
-        user.ai_optimizations += 1
-
-        db.commit()
-
-    return {
-
-        "optimized": optimized
-
-    }
+    return {"optimized": optimized}
 
 
 @router.post("/chat")
 @limiter.limit("5/minute")
 def chat(
-request: Request,
-
+    request: Request,
     chat_request: ChatRequest,
-
-    current_user=Depends(
-        get_current_user
-    ),
-
-    db: Session = Depends(get_db)
-
+    current_user=Depends(get_current_user),
+    db: Database = Depends(get_db),
 ):
+    user_id = current_user["user_id"]
+    now = datetime.now(timezone.utc)
 
-    user_message = ChatMessage(
-
-        user_id=current_user["user_id"],
-
-        sender="user",
-
-        message=chat_request.question
-
-    )
-
-    db.add(user_message)
-
-    db.commit()
+    db["chat_messages"].insert_one({
+        "user_id": user_id,
+        "sender": "user",
+        "message": chat_request.question,
+        "created_at": now,
+    })
 
     context = retrieve_context(
-
         chat_request.question,
-
-        current_user["user_id"]
-
+        user_id,
     )
 
-    documents = []
-
-    if len(context["documents"]) > 0:
-
-        documents = context["documents"][0]
-
-    rag_context = "\n\n".join(documents)
+    documents = context.get("documents") or [[]]
+    rag_context = "\n\n".join(documents[0])
 
     answer = chat_with_ai(
-
         chat_request.question,
-
-        rag_context
-
+        rag_context,
     )
 
-    ai_message = ChatMessage(
+    db["chat_messages"].insert_one({
+        "user_id": user_id,
+        "sender": "ai",
+        "message": answer,
+        "created_at": datetime.now(timezone.utc),
+    })
 
-        user_id=current_user["user_id"],
-
-        sender="ai",
-
-        message=answer
-
-    )
-
-    db.add(ai_message)
-
-    db.commit()
-
-    return {
-
-        "answer": answer
-
-    }
+    return {"answer": answer}
 
 
 @router.get("/chat/history")
 def get_chat_history(
-
-    current_user=Depends(
-        get_current_user
-    ),
-
-    db: Session = Depends(get_db)
-
+    current_user=Depends(get_current_user),
+    db: Database = Depends(get_db),
 ):
-
-    history = (
-
-        db.query(ChatMessage)
-
-        .filter(
-
-            ChatMessage.user_id
-
-            ==
-
-            current_user["user_id"]
-
-        )
-
-        .order_by(
-
-            ChatMessage.created_at.asc()
-
-        )
-
-        .all()
-
+    history = list(
+        db["chat_messages"]
+        .find({"user_id": current_user["user_id"]})
+        .sort("created_at", 1)
     )
 
-    return history
+    return [
+        {
+            "id": str(message["_id"]),
+            "user_id": message["user_id"],
+            "sender": message["sender"],
+            "message": message["message"],
+            "created_at": message["created_at"],
+        }
+        for message in history
+    ]
 
 
 @router.delete("/chat/history")
 def clear_chat(
-
-    current_user=Depends(
-        get_current_user
-    ),
-
-    db: Session = Depends(get_db)
-
+    current_user=Depends(get_current_user),
+    db: Database = Depends(get_db),
 ):
-
-    (
-
-        db.query(ChatMessage)
-
-        .filter(
-
-            ChatMessage.user_id
-
-            ==
-
-            current_user["user_id"]
-
-        )
-
-        .delete()
-
-    )
-
-    db.commit()
+    result = db["chat_messages"].delete_many({
+        "user_id": current_user["user_id"]
+    })
 
     return {
-
-        "message": "Chat Cleared"
-
+        "message": "Chat Cleared",
+        "deleted_count": result.deleted_count,
     }

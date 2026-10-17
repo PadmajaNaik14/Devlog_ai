@@ -1,124 +1,122 @@
-from fastapi import APIRouter
-from fastapi import Depends
-from sqlalchemy.orm import Session
+
+from datetime import datetime, timezone
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException
+from pymongo.database import Database
 
 from app.schemas.user_schema import RegisterUser
-from app.database.dependencies import get_db
-from app.models.user import User
-from app.services.auth_service import hash_password
 from app.schemas.login_schema import LoginUser
-from app.models.login_activity import LoginActivity
-from app.services.auth_service import verify_password
-from fastapi import HTTPException
+from app.database.dependencies import get_db
+from app.services.auth_service import hash_password, verify_password
 from app.services.jwt_service import create_access_token
-from app.middleware.auth_middleware import (
-    get_current_user
-)
+from app.middleware.auth_middleware import get_current_user
 
 router = APIRouter()
 
 
 @router.get("/")
 def test():
-    return {
-        "message": "Auth Route Working"
-    }
+    return {"message": "Auth Route Working"}
 
 
 @router.post("/register")
 def register_user(
     user: RegisterUser,
-    db: Session = Depends(get_db)
+    db: Database = Depends(get_db),
 ):
-
-    existing_user = (
-        db.query(User)
-        .filter(User.email == user.email)
-        .first()
+    existing_user = db["users"].find_one(
+        {"email": user.email}
     )
 
     if existing_user:
-        return {
-            "message": "Email already registered"
-        }
+        raise HTTPException(
+            status_code=409,
+            detail="Email already registered",
+        )
 
-    new_user = User(
-        name=user.name,
-        email=user.email,
-        password_hash=hash_password(user.password)
-    )
+    new_user = {
+        "name": user.name,
+        "email": user.email,
+        "password_hash": hash_password(user.password),
+        "created_at": datetime.now(timezone.utc),
+        "ai_optimizations": 0,
+    }
 
-    db.add(new_user)
-    db.commit()
+    result = db["users"].insert_one(new_user)
 
     return {
-        "message": "User Registered Successfully"
+        "message": "User Registered Successfully",
+        "id": str(result.inserted_id),
     }
 
 
 @router.post("/login")
 def login_user(
     user: LoginUser,
-    db: Session = Depends(get_db)
+    db: Database = Depends(get_db),
 ):
-
-    db_user = (
-        db.query(User)
-        .filter(User.email == user.email)
-        .first()
+    db_user = db["users"].find_one(
+        {"email": user.email}
     )
 
     if not db_user:
-
         raise HTTPException(
             status_code=401,
-            detail="Email not found"
-    )
+            detail="Email not found",
+        )
 
     valid = verify_password(
         user.password,
-        db_user.password_hash
+        db_user["password_hash"],
     )
 
     if not valid:
-
         raise HTTPException(
             status_code=401,
-            detail="Incorrect password"
-    )
+            detail="Incorrect password",
+        )
 
-    token = create_access_token(
-        db_user.id
-    )
-    activity = LoginActivity(
-    user_id=db_user.id
-)
+    user_id = str(db_user["_id"])
 
-    db.add(activity)
-    db.commit()
+    token = create_access_token(user_id)
+
+    db["login_activity"].insert_one({
+        "user_id": user_id,
+        "created_at": datetime.now(timezone.utc),
+    })
 
     return {
         "access_token": token,
-        "token_type": "bearer"
+        "token_type": "bearer",
     }
+
 
 @router.get("/me")
 def get_me(
     current_user=Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Database = Depends(get_db),
 ):
+    user_id = current_user["user_id"]
 
-    user = (
-        db.query(User)
-        .filter(
-            User.id ==
-            current_user["user_id"]
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid user ID",
         )
-        .first()
-    )
+
+    user = db["users"].find_one({
+        "_id": ObjectId(user_id)
+    })
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found",
+        )
 
     return {
-        "id": user.id,
-        "name": user.name,
-        "email": user.email
+        "id": str(user["_id"]),
+        "name": user["name"],
+        "email": user["email"],
     }
