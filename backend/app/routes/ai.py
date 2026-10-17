@@ -1,7 +1,8 @@
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pymongo.database import Database
 
 from app.database.dependencies import get_db
@@ -13,6 +14,7 @@ from app.schemas.chat_schema import ChatRequest
 from app.middleware.auth_middleware import get_current_user
 from app.middleware.rate_limit import limiter
 from bson import ObjectId
+
 router = APIRouter()
 
 
@@ -66,6 +68,57 @@ def optimize(
     return {"optimized": optimized}
 
 
+def get_today_or_latest_journal(db: Database, user_id: str):
+    """
+    Return today's newest journal for this user.
+    If none exists today, return their newest journal overall.
+    Journal timestamps are assumed to be stored in UTC.
+    """
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(tz)
+
+    start_local = datetime.combine(
+        now.date(),
+        time.min,
+        tzinfo=tz,
+    )
+    end_local = datetime.combine(
+        now.date() + timedelta(days=1),
+        time.min,
+        tzinfo=tz,
+    )
+
+    start_utc = start_local.astimezone(timezone.utc).replace(
+        tzinfo=None
+    )
+    end_utc = end_local.astimezone(timezone.utc).replace(
+        tzinfo=None
+    )
+
+    journals = db["journals"]
+
+    # First: newest journal created today.
+    journal = journals.find_one(
+        {
+            "user_id": user_id,
+            "created_at": {
+                "$gte": start_utc,
+                "$lt": end_utc,
+            },
+        },
+        sort=[("created_at", -1)],
+    )
+
+    if journal:
+        return journal
+
+    # Fallback: newest journal from any date.
+    return journals.find_one(
+        {"user_id": user_id},
+        sort=[("created_at", -1)],
+    )
+
+
 @router.post("/chat")
 @limiter.limit("5/minute")
 def chat(
@@ -75,28 +128,77 @@ def chat(
     db: Database = Depends(get_db),
 ):
     user_id = current_user["user_id"]
+    question = chat_request.question.strip()
     now = datetime.now(timezone.utc)
 
     db["chat_messages"].insert_one({
         "user_id": user_id,
         "sender": "user",
-        "message": chat_request.question,
+        "message": question,
         "created_at": now,
     })
 
-    context = retrieve_context(
-        chat_request.question,
-        user_id,
-        db=db,
+    normalized_question = question.lower()
+
+    # Detect the Developer Insights Quick Action.
+    is_developer_insights = (
+        "developer insights" in normalized_question
+        or "analyze today's journal" in normalized_question
+        or "analyze today's diary" in normalized_question
     )
 
-    documents = context.get("documents") or [[]]
-    rag_context = "\n\n".join(documents[0])
+    if is_developer_insights:
+        journal = get_today_or_latest_journal(
+            db,
+            user_id,
+        )
 
-    answer = chat_with_ai(
-        chat_request.question,
-        rag_context,
-    )
+        if journal is None:
+            answer = (
+                "You haven't created any journal entries yet. "
+                "Create your first journal to receive developer insights."
+            )
+        else:
+            journal_content = journal.get("content", "")
+
+            journal_title = journal.get("title", "Untitled")
+            journal_date = journal.get("created_at", "Unknown")
+
+            if not journal_content.strip():
+                answer = (
+                    "Your latest journal has no content to analyze. "
+                    "Please add content to your journal and try again."
+                )
+            else:
+                rag_context = (
+                    "The following is the selected journal for "
+                    "Developer Insights. Use this journal as the "
+                    "primary source of truth.\n\n"
+                    f"Title: {journal_title}\n"
+                    f"Created at: {journal_date}\n\n"
+                    f"Journal content:\n{journal_content}"
+                )
+
+                answer = chat_with_ai(
+                    question,
+                    rag_context,
+                )
+
+    else:
+        # Keep the existing RAG behavior for ordinary chat questions.
+        context = retrieve_context(
+            question,
+            user_id,
+            db=db,
+        )
+
+        documents = context.get("documents") or [[]]
+        rag_context = "\n\n".join(documents[0])
+
+        answer = chat_with_ai(
+            question,
+            rag_context,
+        )
 
     db["chat_messages"].insert_one({
         "user_id": user_id,
