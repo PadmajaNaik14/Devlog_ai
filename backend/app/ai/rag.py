@@ -41,18 +41,64 @@ def delete_journal_embedding(journal_id, user_id):
     )
 
 
-def retrieve_context(query, user_id):
-    """Retrieve relevant journal documents for one user."""
+def retrieve_context(query, user_id, db=None):
+    """Retrieve relevant journals from ChromaDB, with MongoDB fallback."""
 
-    embedding = generate_embedding(query)
+    user_id = str(user_id)
+    docs = []
+    metas = []
+    distances = []
 
-    results = collection.query(
-        query_embeddings=[embedding],
-        n_results=3,
-        where={
-            "user_id": str(user_id),
-        },
-        include=["documents", "metadatas", "distances"],
-    )
+    # Try semantic retrieval first.
+    try:
+        embedding = generate_embedding(query)
 
-    return results
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=5,
+            where={"user_id": user_id},
+            include=["documents", "metadatas", "distances"],
+        )
+
+        docs = (results.get("documents") or [[]])[0] or []
+        metas = (results.get("metadatas") or [[]])[0] or []
+        distances = (results.get("distances") or [[]])[0] or []
+
+    except Exception as e:
+        print(f"ChromaDB retrieval failed: {type(e).__name__}")
+
+    # If semantic search finds nothing, use this user's MongoDB journals.
+    if not docs and db is not None:
+        try:
+            journals = list(
+                db["journals"]
+                .find({"user_id": user_id})
+                .sort("created_at", -1)
+                .limit(10)
+            )
+
+            docs = [
+                f"Title: {j.get('title', 'Untitled')}\n"
+                f"Content: {j.get('content', '')}"
+                for j in journals
+                if j.get("content")
+            ]
+
+            metas = [
+                {
+                    "user_id": user_id,
+                    "journal_id": str(j["_id"]),
+                }
+                for j in journals
+                if j.get("content")
+            ]
+
+        except Exception as e:
+            print(f"MongoDB journal fallback failed: {type(e).__name__}")
+
+    return {
+        "documents": [docs],
+        "metadatas": [metas],
+        "distances": [distances],
+    }
+

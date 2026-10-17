@@ -47,6 +47,7 @@ def optimize(
     context = retrieve_context(
         optimize_request.content,
         user_id,
+        db=db,
     )
 
     documents = context.get("documents") or [[]]
@@ -86,6 +87,7 @@ def chat(
     context = retrieve_context(
         chat_request.question,
         user_id,
+        db=db,
     )
 
     documents = context.get("documents") or [[]]
