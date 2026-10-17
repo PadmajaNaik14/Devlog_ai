@@ -131,6 +131,7 @@ def chat(
     question = chat_request.question.strip()
     now = datetime.now(timezone.utc)
 
+    # Save the user's message.
     db["chat_messages"].insert_one({
         "user_id": user_id,
         "sender": "user",
@@ -152,6 +153,7 @@ def chat(
     )
 
     if requires_today_journal:
+        # Select today's journal, or fall back to the latest journal.
         journal = get_today_or_latest_journal(
             db,
             user_id,
@@ -163,12 +165,20 @@ def chat(
                 "Create your first journal to receive developer insights."
             )
         else:
-            journal_content = journal.get("content", "")
+            journal_content = (
+                journal.get("content") or ""
+            ).strip()
 
-            journal_title = journal.get("title", "Untitled")
-            journal_date = journal.get("created_at", "Unknown")
+            journal_title = journal.get(
+                "title",
+                "Untitled",
+            )
+            journal_date = journal.get(
+                "created_at",
+                "Unknown",
+            )
 
-            if not journal_content.strip():
+            if not journal_content:
                 answer = (
                     "Your latest journal has no content to analyze. "
                     "Please add content to your journal and try again."
@@ -176,8 +186,9 @@ def chat(
             else:
                 rag_context = (
                     "The following is the selected journal for "
-                    "Developer Insights. Use this journal as the "
-                    "primary source of truth.\n\n"
+                    "the user's request. Use this journal as the "
+                    "primary source of truth. Do not claim older "
+                    "work happened today.\n\n"
                     f"Title: {journal_title}\n"
                     f"Created at: {journal_date}\n\n"
                     f"Journal content:\n{journal_content}"
@@ -189,7 +200,7 @@ def chat(
                 )
 
     else:
-        # Keep the existing RAG behavior for ordinary chat questions.
+        # Preserve existing RAG behavior for ordinary chat.
         context = retrieve_context(
             question,
             user_id,
@@ -204,6 +215,13 @@ def chat(
             rag_context,
         )
 
+    # Increment the counter once the request has produced an answer.
+    db["users"].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$inc": {"ai_optimizations": 1}},
+    )
+
+    # Save the AI response.
     db["chat_messages"].insert_one({
         "user_id": user_id,
         "sender": "ai",
@@ -212,6 +230,7 @@ def chat(
     })
 
     return {"answer": answer}
+
 
 
 @router.get("/chat/history")
