@@ -140,14 +140,18 @@ def chat(
 
     normalized_question = question.lower()
 
-    # Detect the Developer Insights Quick Action.
-    is_developer_insights = (
-        "developer insights" in normalized_question
-        or "analyze today's journal" in normalized_question
-        or "analyze today's diary" in normalized_question
+    today_keywords = (
+        "today",
+        "today's",
+        "todays",
     )
 
-    if is_developer_insights:
+    requires_today_journal = any(
+        keyword in normalized_question
+        for keyword in today_keywords
+    )
+
+    if requires_today_journal:
         journal = get_today_or_latest_journal(
             db,
             user_id,
