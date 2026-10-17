@@ -33,7 +33,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://devlogai-six.vercel.app",
+        "https://devlog-ai-psi.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
