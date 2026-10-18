@@ -30,52 +30,8 @@ The application is organized into three layers:
 
 ### High-Level Architecture
 
-``` mermaid
-flowchart TD
-    U[Developer / User]
-    subgraph FE["Frontend — Next.js / React / TypeScript"]
-        AUTHUI[Login and Registration]
-        JUI[Journal Editor and Journal List]
-        CUI[AI Chat and Quick Actions]
-        AUI[Analytics Dashboard]
-    end
-    subgraph BE["Backend — FastAPI"]
-        AUTH[Authentication Routes]
-        JR[Journal Routes]
-        AIR[AI Routes]
-        AR[Analytics Routes]
-        JWT[JWT Authentication]
-        RAG[RAG Retrieval]
-        OPT[Journal Optimizer]
-    end
-    subgraph DS["Data and AI Services"]
-        MDB[(MongoDB)]
-        VDB[(ChromaDB)]
-        GEM[Google Gemini API]
-    end
-    U --> AUTHUI
-    U --> JUI
-    U --> CUI
-    U --> AUI
-    AUTHUI --> AUTH
-    JUI --> JR
-    CUI --> AIR
-    AUI --> AR
-    AUTH --> JWT
-    JR --> JWT
-    AIR --> JWT
-    AR --> JWT
-    AUTH --> MDB
-    JR --> MDB
-    AIR --> MDB
-    AR --> MDB
-    JR --> VDB
-    RAG --> VDB
-    AIR --> RAG
-    AIR --> OPT
-    RAG --> GEM
-    OPT --> GEM
-```
+<img width="1536" height="1024" alt="DevLog AI System Architecture Diagram" src="https://github.com/user-attachments/assets/a006da90-c786-4b2d-81fb-6a10d5a96ccc" />
+
 
 ### AI Chat and Journal Context Flow
 
@@ -378,9 +334,10 @@ project. Confirm exact paths in FastAPI `/docs`.
 
   `GET`                   `/ai/chat/history`       Retrieve the current
                                                    user's chat history
-
+                                                   
   `DELETE`                `/ai/chat/history`       Clear the current
                                                    user's chat history
+
   ------------------------------------------------------------------------
 
 ### Analytics
@@ -411,12 +368,11 @@ project. Confirm exact paths in FastAPI `/docs`.
 
   `GET`                   `/analytics/activity-calendar`                    Journal and login
                                                                             activity dates
-
+                                                                            
   `GET`                   `/analytics/dashboard`                            Combined dashboard
                                                                             statistics
-  -------------------------------------------------------------------------------------------------
 
-------------------------------------------------------------------------
+  -------------------------------------------------------------------------------------------------
 
 ## Security and Data Handling
 
