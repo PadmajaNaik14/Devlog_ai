@@ -54,8 +54,6 @@ const stacks = [
 
       "FastAPI",
 
-      "SQLAlchemy",
-
       "JWT",
 
       "REST APIs"
@@ -100,7 +98,7 @@ const stacks = [
 
     technologies: [
 
-      "PostgreSQL",
+      "MongoDB",
 
       "ChromaDB",
 
